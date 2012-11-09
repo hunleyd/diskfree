@@ -2,7 +2,7 @@
 
 # diskfree - 2.0.8
 
-VERSION="diskfree 2.1.0 - (c) Douglas Hunley, 2002"
+VERSION="diskfree 2.1.0 - (c) Douglas Hunley, 2012"
 
 unset DIRS
 
