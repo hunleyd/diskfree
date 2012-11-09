@@ -33,7 +33,7 @@ diskfree [-p] [-m email_address] [-v] [-l logdir] [-r] [-d dirs]
 Requirements
 ------------
 GNU Bash
-<br>GNU coreutils
+<br>GNU Coreutils
 
 Example Output
 --------------
@@ -55,7 +55,7 @@ https://github.com/hunleyd/diskfree/issues
 
 Twitter
 -------
-Keep up to data on announcements and more by following Doug on Twitter, <a href="http://twitter.com/hunleyd">@hunleyd</a>
+Keep up to date on announcements and more by following Doug on Twitter, <a href="http://twitter.com/hunleyd">@hunleyd</a>
 
 Authors
 -------
