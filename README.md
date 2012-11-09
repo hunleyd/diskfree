@@ -5,14 +5,16 @@ Bash script for reporting on disk usage and growth
 
 Usage
 -----
+<pre>
 diskfree [-p] [-m email_address] [-v] [-l logdir] [-r] [-d dirs]
-<br>  -p - 'I am a paranoid admin' mode. Report on entire directory tree
-<br>  -m - email address to send report to (or '@' to print to stdout)
-<br>  -l - specify directory to store log files in (Default: /tmp)
-<br>  -e - special extension to append to output
-<br>  -v - print version info and exit
-<br>  -r - create and mail report even if empty (so you know it ran)
-<br>  -d - report on specified directories instead of subdirectories of /
+  -p - 'I am a paranoid admin' mode. Report on entire directory tree
+  -m - email address to send report to (or '@' to print to stdout)
+  -l - specify directory to store log files in (Default: /tmp)
+  -e - special extension to append to output
+  -v - print version info and exit
+  -r - create and mail report even if empty (so you know it ran)
+  -d - report on specified directories instead of subdirectories of /
+</pre>
 
   diskfree is a simple self-contained Bash script I wrote to keep track of disk usage
   on a given machine. You simply drop it into /etc/cron.daily and then it will email
@@ -35,16 +37,16 @@ GNU Bash
 
 Example Output
 --------------
-  <pre>
-  Total allocations
-  Filesystem      Size  Used Avail Use% Mounted on
-  /dev/sda3       465G   17G  430G   4% /
-  /dev/sda1        47M   20M   24M  46% /boot
-  /dev/sdb1       466G  242G  209G  54% /home
+<pre>
+Total allocations
+Filesystem      Size  Used Avail Use% Mounted on
+/dev/sda3       465G   17G  430G   4% /
+/dev/sda1        47M   20M   24M  46% /boot
+/dev/sdb1       466G  242G  209G  54% /home
 
-  Changed allocations
-  /home/doug/foo is 10M was 0
-  </pre>
+Changed allocations
+/home/doug/foo is 10M was 0
+</pre>
 
 Bugs
 ----
