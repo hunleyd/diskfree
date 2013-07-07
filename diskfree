@@ -2,7 +2,7 @@
 
 # diskfree - 2.0.8
 
-VERSION="diskfree 2.1.0 - (c) Douglas Hunley, 2012"
+VERSION="diskfree 2.1.0 - (c) Douglas Hunley, 2013"
 
 unset DIRS
 
@@ -33,14 +33,14 @@ while getopts ":pvrd:m:l:e:" opt; do
 			# up to the next argument starting with "-" should
 			# be considered an argument to -d.
 			while [ -z "$DONE" ]; do
-				if [ "${!OPTIND:0:1}" = "-" ] || [ -z "${!OPTIND}" ]; then 
+				if [ "${!OPTIND:0:1}" = "-" ] || [ -z "${!OPTIND}" ]; then
 					DONE=yes;
 				else
-					DIRS="$DIRS ${!OPTIND}" 
+					DIRS="$DIRS ${!OPTIND}"
 					OPTIND=$((OPTIND+1))
 				fi
 			done
-			unset DONE 
+			unset DONE
 			;;
 		l)
 			# Write out temporary and output files here
@@ -62,7 +62,7 @@ while getopts ":pvrd:m:l:e:" opt; do
 		\?)
 			# Give the user a clue
 			echo $VERSION
-			echo 
+			echo
 			echo "USAGE: `basename $0` [-p] [-m email_address] [-v] [-l logdir] [-r] [-d dirs]"
 			echo "  -p - 'I am a paranoid admin' mode. Report on entire directory tree"
 			echo "  -m - email address to send report to (or '@' to print to stdout)"
