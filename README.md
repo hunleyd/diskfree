@@ -53,15 +53,9 @@ Bugs
 Find a bug? Please create an issue here on GitHub at:
 https://github.com/hunleyd/diskfree/issues
 
-Twitter
--------
-Keep up to date on announcements and more by following Doug on Twitter, <a href="http://twitter.com/hunleyd">@hunleyd</a>
-
 Authors
 -------
 **Douglas J Hunley**
-+ G+: http://goo.gl/sajR3
-+ Twitter: http://twitter.com/hunleyd
 + GitHub: http://github.com/hunleyd
 
 Copyright and license

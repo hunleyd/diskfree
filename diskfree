@@ -1,39 +1,55 @@
-#!/bin/sh
+#!/bin/bash
 
-# diskfree - 2.0.8
+# diskfree - A script to monitor and report changes in disk usage.
+#
+# This script scans specified directories for their disk usage, compares the results 
+# with the previous run, and generates a report of added, deleted, or changed 
+# allocations. It can then mail this report to a specified user.
+#
+# Version: 2.1.1
+# Author: Douglas Hunley, 2013-2026
 
-VERSION="diskfree 2.1.0 - (c) Douglas Hunley, 2013"
+set -o pipefail
+set -u
 
-unset DIRS
+VERSION="diskfree 2.1.1 - (c) Douglas Hunley, 2013-2026"
 
-# Check out our command line arguments
+# Configuration and State Variables
+DIRS=""               # List of directories to monitor (defaults to /* if empty)
+EXTENSION=""          # Optional suffix for output files (set via -e)
+GNU=no                # Whether GNU coreutils (du, df) are available
+MAILER=/usr/sbin/sendmail # Path to the system's mailer
+MAILTO=root           # Recipient for the disk usage report
+OUTPUT=/tmp           # Directory where temporary and log files are stored
+PARANOID=no           # If 'yes', reports on the entire directory tree (-p flag)
+REPORT_REGARDLESS=no  # If 'yes', sends a report even if no changes were detected (-r flag)
+
+# Process command line arguments
 while getopts ":pvrd:m:l:e:" opt; do
 	case $opt in
 		p)
-			# We'll do full dir. tree reporting instead of
-			# top-level summarizing
+			# Paranoid mode: report on the entire directory tree instead 
+			# of just summarizing at the top level.
 			PARANOID=yes
 			;;
 		m)
-			# Send the report to someone other than root
-			MAILTO=$OPTARG
+			# Set the recipient email address for the report.
+			# Use '@' to print to stdout instead of mailing.
+			MAILTO="$OPTARG"
 			;;
 		d)
-			# Report on an arbitrary set of directories.
-			# This is more "paranoid" than the default,
-			# but less "paranoid" than "-p".
+			# Report on a specific set of directories.
+			# This captures all arguments until the next option (starting with '-').
 			unset DONE
-			if [ "${OPTARG:0:1}" = "-" ]; then
+			if [[ "${OPTARG:0:1}" == "-" ]]; then
 				true
 			else
-				DIRS=$OPTARG
+				DIRS="$OPTARG"
 			fi
-			# The $OPTARG variable only gives us the first
-			# argument to -d. However, all the arguments
-			# up to the next argument starting with "-" should
-			# be considered an argument to -d.
-			while [ -z "$DONE" ]; do
-				if [ "${!OPTIND:0:1}" = "-" ] || [ -z "${!OPTIND}" ]; then
+			
+			# Collect additional directory paths provided after the initial -d argument.
+			while [[ -z "${DONE:-}" ]]; do
+				if [[ "${!OPTIND:0:1}" == "-" ]] || [[ -z "${!OPTIND:-}" ]]; then
 					DONE=yes;
 				else
 					DIRS="$DIRS ${!OPTIND}"
@@ -43,31 +59,31 @@ while getopts ":pvrd:m:l:e:" opt; do
 			unset DONE
 			;;
 		l)
-			# Write out temporary and output files here
-			OUTPUT=$OPTARG
+			# Specify the directory where temporary and output files should be written.
+			OUTPUT="$OPTARG"
 			;;
 		e)
-			# what special extension on our output file
+			# Set a custom extension for the output files.
 			EXTENSION=".${OPTARG}"
 			;;
 		r)
-			# report even when nothing changed?
+			# Force a report even if no changes in disk usage are found.
 			REPORT_REGARDLESS=yes
 			;;
 		v)
-			# Spew our version info
-			echo $VERSION
+			# Display version information and exit.
+			echo "$VERSION"
 			exit 0
 			;;
 		\?)
-			# Give the user a clue
-			echo $VERSION
+			# Display usage instructions and exit with an error.
+			echo "$VERSION"
 			echo
-			echo "USAGE: `basename $0` [-p] [-m email_address] [-v] [-l logdir] [-r] [-d dirs]"
+			echo "USAGE: $(basename "$0") [-p] [-m email_address] [-v] [-l logdir] [-r] [-d dirs]"
 			echo "  -p - 'I am a paranoid admin' mode. Report on entire directory tree"
 			echo "  -m - email address to send report to (or '@' to print to stdout)"
 			echo "  -l - specify directory to store log files in (Default: /tmp)"
-			echo "  -e - special extension to append to output (see INSTALL)"
+			echo "  -e - special extension to append to output"
 			echo "  -v - print version info and exit"
 			echo "  -r - create and mail report even if empty (so you know it ran)"
 			echo "  -d - report on specified directories instead of subdirectories of /"
@@ -76,201 +92,207 @@ while getopts ":pvrd:m:l:e:" opt; do
 	esac
 done
 
-# Clear the arg list
-shift $(($OPTIND - 1))
+# Adjust positional parameters to remove options processed by getopts
+shift $((OPTIND - 1))
 
-# Mail program to use
-MAILER=/usr/sbin/sendmail
-# Previous output
-PREVIOUS=${OUTPUT:-/tmp}/`basename $0`.previous$EXTENSION
-# Current output
-CURRENT=${OUTPUT:-/tmp}/`basename $0`.current$EXTENSION
-# Deleted allocations
-DELETED=${OUTPUT:-/tmp}/`basename $0`.deleted$EXTENSION
-# Added allocations
-ADDED=${OUTPUT:-/tmp}/`basename $0`.added$EXTENSION
-# Changed allocations
-CHANGED=${OUTPUT:-/tmp}/`basename $0`.changed$EXTENSION
-# scratch area
-WORKFILE=${OUTPUT:-/tmp}/`basename $0`.work$EXTENSION
-# The final report
-REPORT=${OUTPUT:-/tmp}/`basename $0`.report$EXTENSION
-# Default value for '-d'
-if [ -z "$DIRS" ]; then
+# Define paths for temporary files used during processing
+PREVIOUS="${OUTPUT}/$(basename "$0").previous${EXTENSION}" # Data from the last successful run
+CURRENT="${OUTPUT}/$(basename "$0").current${EXTENSION}"   # Data collected in the current run
+DELETED="${OUTPUT}/$(basename "$0").deleted${EXTENSION}"   # List of directories removed since last run
+ADDED="${OUTPUT}/$(basename "$0").added${EXTENSION}"       # List of new directories since last run
+CHANGED="${OUTPUT}/$(basename "$0").changed${EXTENSION}"   # List of directories with changed usage
+WORKFILE="${OUTPUT}/$(basename "$0").work${EXTENSION}"     # Temporary scratch file for diffs/processing
+REPORT="${OUTPUT}/$(basename "$0").report${EXTENSION}"     # The final report content to be mailed/printed
+
+# Set default directory search if none was specified via -d
+if [[ -z "${DIRS}" ]]; then
 	DIRS="/*"
 fi
 
-# do some security conscious cleaning here
-for file in $PREVIOUS $CURRENT $DELETED $ADDED $CHANGED $WORKFILE $REPORT $REPORT.2
+# Security check: Remove any symbolic links that might be mimicking our temporary files.
+for file in "$PREVIOUS" "$CURRENT" "$DELETED" "$ADDED" "$CHANGED" "$WORKFILE" "$REPORT" "$REPORT.2"
 do
-	if [ -L $file ] ; then
-		rm -f $file
+	if [[ -L "$file" ]] ; then
+		rm -f "$file"
 	fi
 done
 
-# use the GNU version of 'du' and 'df' if available
-GNU=yes
-du -h ${HOME} >/dev/null 2>&1
-if [ "$?" = "0" ] ; then
-	# GNU utilities used here
+# Detect if GNU versions of 'du' and 'df' are available for better output formatting.
+if du --version >/dev/null 2>&1; then
 	GNU=yes
 fi
 
-# build our 'du' command given the command line args and the results of above
-if [ "$GNU" = "yes" ] ; then
-	DU_ARGS="-h"
+# Configure arguments for 'du' based on tool availability and paranoid mode.
+if [[ "$GNU" == "yes" ]] ; then
+	DU_ARGS="-h" # Human-readable output if GNU is available
 else
-	DU_ARGS="-k"
+	DU_ARGS="-k" # Kilobytes output for POSIX-compliant du
 fi
-if [ -z "$PARANOID" ] ; then
-	DU_ARGS="-s $DU_ARGS"
+if [[ "$PARANOID" == "no" ]] ; then
+	DU_ARGS="-s $DU_ARGS" # Summary mode: only report top-level directories
 fi
 
-# build our 'df' command based on the above and some more checks
-case `uname -s` in
+# Select the appropriate 'df' command and flags for the current platform.
+case $(uname -s) in
 	HP-UX)
-		# the "normal" df on HP-UX creates some really UGLY output
-		# so we use their provided Berkely compatible version instead
+		# Use 'bdf' (Berkeley df) on HP-UX for more readable output.
 		DF=bdf
 		;;
 	*)
 		DF=df
 		;;
 esac
-if [ "$GNU" = "yes" ] ; then
-	DF="$DF -h"
+if [[ "$GNU" == "yes" ]] ; then
+	DF="$DF -h" # Human-readable output for GNU df
 else
-	DF="$DF -k"
+	DF="$DF -k" # Kilobytes output for standard df
 fi
 
-# create today's listing
+# Collect disk usage data for the specified directories.
 cd /
-# we don't report on /proc if it's around since it's not stable at all
-du $DU_ARGS $DIRS 2>/dev/null | grep -v '	/proc' > $CURRENT
-sort -k 2 $CURRENT > $CURRENT.sorted$EXTENSION && mv $CURRENT.sorted$EXTENSION $CURRENT
+# Note: We exclude /proc as its size reported by du is inconsistent and unreliable.
+# shellcheck disable=SC2086
+du $DU_ARGS $DIRS 2>/dev/null | grep -v $'\t/proc' > "$CURRENT"
+# Sort the current data by directory name for consistent comparison.
+sort -k 2 "$CURRENT" > "$CURRENT.sorted${EXTENSION}" && mv "$CURRENT.sorted${EXTENSION}" "$CURRENT"
 
-# is there a previous output to compare against?
-if [ -s $PREVIOUS ] ; then
-	# yep, let's start reporting
-	cat $PREVIOUS | awk '{print $2}' > $PREVIOUS.tmp$EXTENSION
-	cat $CURRENT | awk '{print $2}' > $CURRENT.tmp$EXTENSION
+# Check if there is data from a previous run to compare against.
+if [[ -s "$PREVIOUS" ]] ; then
+	# Extract directory names (column 2) for comparison.
+	awk '{print $2}' "$PREVIOUS" > "$PREVIOUS.tmp${EXTENSION}"
+	awk '{print $2}' "$CURRENT" > "$CURRENT.tmp${EXTENSION}"
 
-	# what directories are gone?
-	comm -23 $PREVIOUS.tmp$EXTENSION $CURRENT.tmp$EXTENSION > $DELETED.tmp$EXTENSION
-	cat $DELETED.tmp$EXTENSION | while read line
+	# Identify directories that were present previously but are now missing.
+	comm -23 "$PREVIOUS.tmp${EXTENSION}" "$CURRENT.tmp${EXTENSION}" > "$DELETED.tmp${EXTENSION}"
+	while read -r line
 	do
-		# the expression below contains a LITERAL tab
-		eval grep '	${line}$' $PREVIOUS >> $DELETED
-	done
-	rm $DELETED.tmp$EXTENSION >/dev/null 2>&1
+		# Retrieve the full 'du' output line for each deleted directory.
+		grep $'\t'"${line}$" "$PREVIOUS" >> "$DELETED" || true
+	done < "$DELETED.tmp${EXTENSION}"
+	rm "$DELETED.tmp${EXTENSION}" >/dev/null 2>&1
 
-	# what directories have been added?
-	comm -13 $PREVIOUS.tmp$EXTENSION $CURRENT.tmp$EXTENSION > $ADDED.tmp$EXTENSION
-	cat $ADDED.tmp$EXTENSION | while read line
+	# Identify directories that were not present previously but are now present.
+	comm -13 "$PREVIOUS.tmp${EXTENSION}" "$CURRENT.tmp${EXTENSION}" > "$ADDED.tmp${EXTENSION}"
+	while read -r line
 	do
-		# the expression below contains a LITERAL tab
-		eval grep '	${line}$' $CURRENT >> $ADDED
-	done
-	rm $ADDED.tmp$EXTENSION >/dev/null 2>&1
+		# Retrieve the full 'du' output line for each added directory.
+		grep $'\t'"${line}$" "$CURRENT" >> "$ADDED" || true
+	done < "$ADDED.tmp${EXTENSION}"
+	rm "$ADDED.tmp${EXTENSION}" >/dev/null 2>&1
 
-	# the rest of the directories
-	comm -12 $PREVIOUS.tmp$EXTENSION $CURRENT.tmp$EXTENSION >> $CHANGED.tmp$EXTENSION
-	cat $CHANGED.tmp$EXTENSION | while read line
+	# Identify directories present in both runs to check for size changes.
+	comm -12 "$PREVIOUS.tmp${EXTENSION}" "$CURRENT.tmp${EXTENSION}" > "$CHANGED.tmp${EXTENSION}"
+	while read -r line
 	do
-		# the expression below contains a LITERAL tab
-		eval grep '	${line}$' $PREVIOUS >> $PREVIOUS.CURRENT$EXTENSION
-		eval grep '	${line}$' $CURRENT >> $CHANGED.CURRENT$EXTENSION
-	done
-	rm $CHANGED.tmp$EXTENSION >/dev/null 2>&1
-	diff $PREVIOUS.CURRENT$EXTENSION $CHANGED.CURRENT$EXTENSION > $WORKFILE
-	rm $PREVIOUS.CURRENT$EXTENSION $CHANGED.CURRENT$EXTENSION >/dev/null 2>&1
+		# Store entries for shared directories from both runs for diffing.
+		grep $'\t'"${line}$" "$PREVIOUS" >> "$PREVIOUS.CURRENT${EXTENSION}" || true
+		grep $'\t'"${line}$" "$CURRENT" >> "$CHANGED.CURRENT${EXTENSION}" || true
+	done < "$CHANGED.tmp${EXTENSION}"
+	rm "$CHANGED.tmp${EXTENSION}" >/dev/null 2>&1
+
+	# Use diff to identify which shared directories have changed in size.
+	if [[ -f "$PREVIOUS.CURRENT${EXTENSION}" ]] && [[ -f "$CHANGED.CURRENT${EXTENSION}" ]]; then
+		diff "$PREVIOUS.CURRENT${EXTENSION}" "$CHANGED.CURRENT${EXTENSION}" > "$WORKFILE"
+		rm "$PREVIOUS.CURRENT${EXTENSION}" "$CHANGED.CURRENT${EXTENSION}" >/dev/null 2>&1
+	fi
+
 	DIR=
-	cat $WORKFILE | egrep '^<|^>' | while read line
-	do
-		DIR2=`echo $line | awk '{print $3}'`
-		if [ "$DIR" = "$DIR2" ] ; then
-			is=`echo $line | awk '{print $2}'`
-                        if [ ! "$is" = "$was" ] ; then
-                                echo "$DIR is $is was $was" >> $CHANGED
-                        fi
-		else
-			DIR=$DIR2
-			was=`echo $line | awk '{print $2}'`
-		fi
-	done
+	was=
+	# Parse the diff output to generate a summary of changed allocations.
+	if [[ -s "$WORKFILE" ]]; then
+		while read -r line
+		do
+			# Extract directory name and size from the diff lines.
+			DIR2=$(echo "$line" | awk '{print $3}')
+			if [[ "$DIR" == "$DIR2" ]] ; then
+				is=$(echo "$line" | awk '{print $2}')
+				# If we have both old and new sizes, record the change.
+				if [[ "${was}" != "" ]] && [[ "$is" != "$was" ]] ; then
+					echo "$DIR is $is was $was" >> "$CHANGED"
+				fi
+			else
+				DIR="$DIR2"
+				was=$(echo "$line" | awk '{print $2}')
+			fi
+		done < <(grep -E '^<|^>' "$WORKFILE")
+	fi
 
-	# start creating the report
-	if [ -s $CHANGED ] ; then
-		if [ "$GNU" = "yes" ] ; then
-			echo "Changed allocations" >> $REPORT
-		else
-			echo "Changed allocations (Kb)" >> $REPORT
+	# Construct the body of the report.
+	{
+		if [[ -s "$CHANGED" ]] ; then
+			if [[ "$GNU" == "yes" ]] ; then
+				echo "Changed allocations"
+			else
+				echo "Changed allocations (Kb)"
+			fi
+			cat "$CHANGED"
+			echo
 		fi
-		cat $CHANGED >> $REPORT
-		echo >> $REPORT
-	fi
-	if [ -s $ADDED ] ; then
-		if [ "$GNU" = "yes" ] ; then
-			echo "New allocations" >> $REPORT
-		else
-			echo "New allocations (Kb)" >> $REPORT
+		if [[ -s "$ADDED" ]] ; then
+			if [[ "$GNU" == "yes" ]] ; then
+				echo "New allocations"
+			else
+				echo "New allocations (Kb)"
+			fi
+			cat "$ADDED"
+			echo
 		fi
-		cat $ADDED >> $REPORT
-		echo >> $REPORT
-	fi
-	if [ -s $DELETED ] ; then
-		if [ "$GNU" = "yes" ] ; then
-			echo "Freed allocations" >> $REPORT
-		else
-			echo "Freed allocations (Kb)" >> $REPORT
+		if [[ -s "$DELETED" ]] ; then
+			if [[ "$GNU" == "yes" ]] ; then
+				echo "Freed allocations"
+			else
+				echo "Freed allocations (Kb)"
+			fi
+			cat "$DELETED"
+			echo
 		fi
-		cat $DELETED >> $REPORT
-		echo >> $REPORT
-	fi
+	} >> "$REPORT"
 fi
-if [ -s $REPORT ] ; then
-	if [ "$GNU" = "yes" ] ; then
-		echo "Total allocations" >> $REPORT.2
-		$DF >> $REPORT.2
+
+# If a report was generated (i.e., changes were found), finalize and deliver it.
+if [[ -s "$REPORT" ]] ; then
+	{
+		if [[ "$GNU" == "yes" ]] ; then
+			echo "Total allocations"
+		else
+			echo "Total allocations (Kb)"
+		fi
+		# Include the overall system disk usage (df) at the top of the report.
+		# shellcheck disable=SC2086
+		$DF
+		echo
+		cat "$REPORT"
+	} > "$REPORT.2"
+	mv "$REPORT.2" "$REPORT"
+	
+	# Deliver the report either to stdout or via email.
+	if [[ "${MAILTO}" == "@" ]]; then
+		cat "$REPORT"
 	else
-		echo "Total allocations (Kb)" >> $REPORT.2
-		$DF >> $REPORT.2
-	fi
-	echo >> $REPORT.2
-	cat $REPORT >> $REPORT.2
-	mv $REPORT.2 $REPORT
-	if [ "$MAILTO" = "@" ]; then
-		# If "-m @" is specified, print report to stdout instead
-		# of mailing
-		cat $REPORT
-	else
-		( echo Subject: $EXTENSION Disk Usage Report
-		  echo From: Disk Usage System '<nobody>'
-		  echo To: ${MAILTO:-root}
-		  cat $REPORT
-		  echo .
-		  ) | $MAILER ${MAILTO:-root}
+		( echo "Subject: ${EXTENSION} Disk Usage Report"
+		  echo "From: Disk Usage System <nobody>"
+		  echo "To: ${MAILTO}"
+		  cat "$REPORT"
+		) | "$MAILER" "${MAILTO}"
 	fi
 else
-	if [ -z "$REPORT_REGARDLESS" ] ; then
-		:
-	else
-		( echo Subject: $EXTENSION Disk Usage Report
-		  echo From: Disk Usage System '<nobody>'
-		  echo To: ${MAILTO:-root}
-		  echo No disk changes to report
-		  echo .
-		) | $MAILER ${MAILTO:-root}
+	# If no changes were found but reporting was requested regardless, send a notification.
+	if [[ "${REPORT_REGARDLESS}" == "yes" ]] ; then
+		( echo "Subject: ${EXTENSION} Disk Usage Report"
+		  echo "From: Disk Usage System <nobody>"
+		  echo "To: ${MAILTO}"
+		  echo "No disk changes to report"
+		) | "$MAILER" "${MAILTO}"
 	fi
 fi
 
-# move the current info for the next run to use
-mv $CURRENT $PREVIOUS >/dev/null 2>&1
+# Rotate current data to 'previous' for comparison in the next run.
+mv "$CURRENT" "$PREVIOUS" >/dev/null 2>&1
 
-# all done, clean up and exit
-for file in $DELETED $ADDED $CHANGED $WORKFILE $CURRENT.tmp$EXTENSION $PREVIOUS.tmp$EXTENSION $REPORT
+# Clean up temporary processing files.
+for file in "$DELETED" "$ADDED" "$CHANGED" "$WORKFILE" "$CURRENT.tmp${EXTENSION}" "$PREVIOUS.tmp${EXTENSION}" "$REPORT"
 do
-	rm $file >/dev/null 2>&1
+	rm -f "$file" >/dev/null 2>&1
 done
 
 exit 0
