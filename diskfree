@@ -6,13 +6,13 @@
 # with the previous run, and generates a report of added, deleted, or changed 
 # allocations. It can then mail this report to a specified user.
 #
-# Version: 2.1.1
+# Version: 2.1.2
 # Author: Douglas Hunley, 2013-2026
 
 set -o pipefail
 set -u
 
-VERSION="diskfree 2.1.1 - (c) Douglas Hunley, 2013-2026"
+VERSION="diskfree 2.1.2 - (c) Douglas Hunley, 2013-2026"
 
 # Configuration and State Variables
 DIRS=""               # List of directories to monitor (defaults to /* if empty)
@@ -136,10 +136,10 @@ fi
 case $(uname -s) in
 	HP-UX)
 		# Use 'bdf' (Berkeley df) on HP-UX for more readable output.
-		DF=bdf
+		DF="bdf"
 		;;
 	*)
-		DF=df
+		DF="df"
 		;;
 esac
 if [[ "$GNU" == "yes" ]] ; then
